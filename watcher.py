@@ -19,20 +19,20 @@ PROCESSED_FILE = "processed_files.txt"
 APP_TOKEN = os.environ["LARK_APP_TOKEN"]
 TABLE_ID = os.environ["LARK_TABLE_ID"]
 
-# Lark field IDs
+# Lark field IDs (hardcoded)
 LARK_FIELDS = {
-    "lab_number": os.environ["LARK_FLD_LAB_NUMBER"],
-    "sample_date": os.environ["LARK_FLD_SAMPLE_DATE"],
-    "client": os.environ["LARK_FLD_CLIENT"],
-    "farm": os.environ["LARK_FLD_FARM"],
-    "address": os.environ["LARK_FLD_ADDRESS"],
-    "purpose": os.environ["LARK_FLD_PURPOSE"],
-    "species": os.environ["LARK_FLD_SPECIES"],
-    "state_vet": os.environ["LARK_FLD_STATE_VET"],
-    "disease": os.environ["LARK_FLD_DISEASE"],
-    "titre": os.environ["LARK_FLD_TITRE"],
-    "cv": os.environ["LARK_FLD_CV"],
-    "interpretation": os.environ["LARK_FLD_INTERPRETATION"]
+    "lab_number": "flddRmu5It",
+    "sample_date": "fldX0aY5kH",
+    "client": "fldAtkUdXB",
+    "farm": "fldqjccBNo",
+    "address": "fldPy4ClNg",
+    "purpose": "fldiTix9Nk",
+    "species": "fldxldCfYI",
+    "state_vet": "fldRthV8jp",
+    "disease": "fldFQRj1wH",
+    "titre": "fldDEVDTdt",
+    "cv": "fldyHnbTxJ",
+    "interpretation": "fldxmt3lMo"
 }
 
 # -----------------------------
