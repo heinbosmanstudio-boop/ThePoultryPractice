@@ -3,50 +3,37 @@ import time
 import threading
 import requests
 from pathlib import Path
-from flask import Flask
-from extract_pdf import extract_diseases_from_pdf  # <-- your PDF parser
-
-app = Flask(__name__)
+from extract_pdf import extract_diseases_from_pdf  # your PDF parser
 
 # -----------------------------
-# CONFIGURATION
+# CONFIGURATION FROM ENV
 # -----------------------------
-
-TENANT_ID = os.environ.get("TENANT_ID")
-CLIENT_ID = os.environ.get("CLIENT_ID")
-CLIENT_SECRET = os.environ.get("CLIENT_SECRET")
-
-ONEDRIVE_OWNER_EMAIL = "hanlie.bosman@gmail.com"
-ONEDRIVE_FOLDER = "poultry reports"
-
+TENANT_ID = os.environ["TENANT_ID"]
+CLIENT_ID = os.environ["CLIENT_ID"]
+CLIENT_SECRET = os.environ["CLIENT_SECRET"]
+ONEDRIVE_OWNER_EMAIL = os.environ.get("ONEDRIVE_OWNER_EMAIL", "hanlie.bosman@gmail.com")
+ONEDRIVE_FOLDER = os.environ.get("ONEDRIVE_FOLDER", "poultry reports")
 PROCESSED_FILE = "processed_files.txt"
 
 # Lark configuration
-APP_TOKEN = os.environ.get("LARK_APP_TOKEN")
-TABLE_ID = os.environ.get("LARK_TABLE_ID")
+APP_TOKEN = os.environ["LARK_APP_TOKEN"]
+TABLE_ID = os.environ["LARK_TABLE_ID"]
 
-# Lark field IDs (replace with your actual field IDs)
+# Lark field IDs
 LARK_FIELDS = {
-    "lab_number": "flddRmu5It",
-    "sample_date": "fldX0aY5kH",
-    "client": "fldAtkUdXB",
-    "farm": "fldqjccBNo",
-    "address": "fldPy4ClNg",
-    "purpose": "fldiTix9Nk",
-    "species": "fldxldCfYI",
-    "state_vet": "fldRthV8jp",
-    "disease": "fldFQRj1wH",
-    "titre": "fldDEVDTdt",
-    "cv": "fldyHnbTxJ",
-    "interpretation": "fldxmt3lMo"
+    "lab_number": os.environ["LARK_FLD_LAB_NUMBER"],
+    "sample_date": os.environ["LARK_FLD_SAMPLE_DATE"],
+    "client": os.environ["LARK_FLD_CLIENT"],
+    "farm": os.environ["LARK_FLD_FARM"],
+    "address": os.environ["LARK_FLD_ADDRESS"],
+    "purpose": os.environ["LARK_FLD_PURPOSE"],
+    "species": os.environ["LARK_FLD_SPECIES"],
+    "state_vet": os.environ["LARK_FLD_STATE_VET"],
+    "disease": os.environ["LARK_FLD_DISEASE"],
+    "titre": os.environ["LARK_FLD_TITRE"],
+    "cv": os.environ["LARK_FLD_CV"],
+    "interpretation": os.environ["LARK_FLD_INTERPRETATION"]
 }
-
-# -----------------------------
-# FLASK ROUTE
-# -----------------------------
-@app.route("/")
-def home():
-    return "Watcher running"
 
 # -----------------------------
 # GET GRAPH TOKEN
@@ -103,10 +90,7 @@ def download_file(file):
 # -----------------------------
 def insert_to_lark(metadata, disease_row):
     url = f"https://open.larksuite.com/open-apis/bitable/v1/apps/{APP_TOKEN}/tables/{TABLE_ID}/records"
-    headers = {
-        "Authorization": f"Bearer {APP_TOKEN}",
-        "Content-Type": "application/json"
-    }
+    headers = {"Authorization": f"Bearer {APP_TOKEN}", "Content-Type": "application/json"}
     fields = {
         LARK_FIELDS["lab_number"]: metadata["lab_number"],
         LARK_FIELDS["sample_date"]: metadata["sample_date"],
@@ -129,6 +113,7 @@ def insert_to_lark(metadata, disease_row):
 # WATCHER LOOP
 # -----------------------------
 def watcher_loop():
+    print("Watcher loop started")
     while True:
         try:
             token = get_token()
@@ -144,7 +129,7 @@ def watcher_loop():
                 print(f"New PDF detected: {file['name']}")
                 path = download_file(file)
 
-                # Use your real PDF parser here
+                # Use your PDF parser
                 metadata, diseases = extract_diseases_from_pdf(path)
 
                 for row in diseases:
@@ -164,6 +149,14 @@ if __name__ == "__main__":
     print("Starting watcher thread...")
     thread = threading.Thread(target=watcher_loop, daemon=True)
     thread.start()
+    
+    # Simple health endpoint for Render/Azure
+    from flask import Flask
+    app = Flask(__name__)
+
+    @app.route("/")
+    def home():
+        return "Watcher running"
 
     port = int(os.environ.get("PORT", 10000))
     print(f"Starting web server on port {port}")
