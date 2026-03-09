@@ -14,14 +14,14 @@ APP_SECRET = os.environ.get("APP_SECRET")
 APP_TOKEN = os.environ.get("APP_TOKEN")
 TABLE_ID = os.environ.get("TABLE_ID")
 
-ONEDRIVE_FOLDER_LINK = "https://1drv.ms/f/s/3a0d67070371eb0d/IgB_Tn54Jz5VSKF0cHc7LuySAXAVji6Pzci7QYbULrKnp2g?e=lAgbtb"
+ONEDRIVE_SHARED_FOLDER_LINK = "https://1drv.ms/f/s/3a0d67070371eb0d/IgB_Tn54Jz5VSKF0cHc7LuySAXAVji6Pzci7QYbULrKnp2g?e=lAgbtb"
 
 LOCAL_PDF_FOLDER = Path("/tmp/pdfs")
 PROCESSED_FOLDER = LOCAL_PDF_FOLDER / "processed"
 LOCAL_PDF_FOLDER.mkdir(parents=True, exist_ok=True)
 PROCESSED_FOLDER.mkdir(exist_ok=True)
 
-POLL_INTERVAL = 60  # seconds
+POLL_INTERVAL = 120  # seconds
 
 # -----------------------------
 # TENANT TOKEN
@@ -109,7 +109,25 @@ def download_pdf(file_url, dest_folder):
     return local_path
 
 # -----------------------------
-# POLLING LOOP
+# GET FILES FROM ONEDRIVE FOLDER
+# -----------------------------
+def list_onedrive_pdfs(shared_folder_link):
+    # Transform shared link into "embed" JSON endpoint
+    embed_url = shared_folder_link.replace("1drv.ms", "1drv.ws").replace("?e=", "?embed=json&")
+    r = requests.get(embed_url)
+    r.raise_for_status()
+    data = r.json()
+    pdf_urls = []
+
+    # OneDrive JSON structure may vary, but files usually in 'value' list
+    for item in data.get("value", []):
+        name = item.get("name", "")
+        if name.lower().endswith(".pdf"):
+            pdf_urls.append(item.get("webUrl"))
+    return pdf_urls
+
+# -----------------------------
+# WATCHER LOOP
 # -----------------------------
 def watcher():
     print("👀 Watcher running. Polling OneDrive folder...")
@@ -118,10 +136,7 @@ def watcher():
 
     while True:
         try:
-            # For now, OneDrive link list (replace with API call if dynamic)
-            pdf_urls = [
-                ONEDRIVE_FOLDER_LINK
-            ]
+            pdf_urls = list_onedrive_pdfs(ONEDRIVE_SHARED_FOLDER_LINK)
 
             for url in pdf_urls:
                 filename = urlparse(url).path.split("/")[-1]
