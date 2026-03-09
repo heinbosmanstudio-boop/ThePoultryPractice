@@ -2,151 +2,119 @@ import os
 import time
 import threading
 import requests
-import pdfplumber
-from pathlib import Path
-from io import BytesIO
-from urllib.parse import unquote
-from urllib.request import urlopen
-
-# -------------------------
-# ENV VARIABLES
-# -------------------------
-APP_ID = os.environ["APP_ID"]
-APP_SECRET = os.environ["APP_SECRET"]
-APP_TOKEN = os.environ["APP_TOKEN"]
-TABLE_ID = os.environ["TABLE_ID"]
-ONEDRIVE_SHARE_LINK = os.environ["ONEDRIVE_SHARE_LINK"]  # folder link
-POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL", 120))  # seconds
-
-# -------------------------
-# LARK TENANT TOKEN
-# -------------------------
-def get_tenant_token():
-    url = "https://open.larksuite.com/open-apis/auth/v3/tenant_access_token/internal"
-    payload = {"app_id": APP_ID, "app_secret": APP_SECRET}
-    r = requests.post(url, json=payload)
-    r.raise_for_status()
-    data = r.json()
-    return data["tenant_access_token"]
-
-# -------------------------
-# INSERT RECORD INTO LARK
-# -------------------------
-def insert_record(token, metadata, disease_row):
-    url = f"https://open.larksuite.com/open-apis/bitable/v1/apps/{APP_TOKEN}/tables/{TABLE_ID}/records"
-    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-
-    fields = {
-        "flddRmu5It": metadata["lab_number"],
-        "fldX0aY5kH": metadata["sample_date"],
-        "fldAtkUdXB": metadata["client"],
-        "fldqjccBNo": metadata["farm"],
-        "fldPy4ClNg": metadata["address"],
-        "fldiTix9Nk": metadata["purpose"],
-        "fldxldCfYI": metadata["species"],
-        "fldRthV8jp": metadata["state_vet"],
-        "fldFQRj1wH": disease_row["disease"],
-        "fldDEVDTdt": disease_row["titre"],
-        "fldyHnbTxJ": disease_row["cv"],
-        "fldxmt3lMo": disease_row["interpretation"],
-    }
-
-    payload = {"fields": fields}
-    r = requests.post(url, headers=headers, json=payload)
-    print(r.status_code, r.text)
-
-# -------------------------
-# EXTRACT PDF DATA
-# -------------------------
-def extract_report_from_bytes(pdf_bytes):
-    with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
-        full_text = "\n".join(page.extract_text() or "" for page in pdf.pages)
-
-    header = {
-        "lab_number": header_get(full_text, "Lab Number"),
-        "sample_date": header_get(full_text, "Sample Date"),
-        "client": header_get(full_text, "Client"),
-        "farm": header_get(full_text, "Farm Name"),
-        "address": header_get(full_text, "Address"),
-        "purpose": header_get(full_text, "Purpose of Sampling"),
-        "species": header_get(full_text, "Species"),
-        "state_vet": header_get(full_text, "State Veterinarian"),
-    }
-
-    diseases = []
-    import re
-    avg_titres = re.findall(r"Avg Titre\s+(\d+)", full_text)
-    cv_percents = re.findall(r"CV %\s+([\d.]+)", full_text)
-    disease_matches = re.findall(r"Disease\s+(.+?)\s+Interpretation\s+([1A]|Vaccinal|Positive|Negative)", full_text)
-
-    for i, dm in enumerate(disease_matches):
-        disease = {
-            "disease": dm[0].strip(),
-            "titre": avg_titres[i] if i < len(avg_titres) else "",
-            "cv": cv_percents[i] if i < len(cv_percents) else "",
-            "interpretation": dm[1],
-        }
-        diseases.append(disease)
-
-    return header, diseases
-
-def header_get(text, field):
-    import re
-    match = re.search(rf"{re.escape(field)}\s*:\s*(.+)", text)
-    return match.group(1).strip() if match else ""
-
-# -------------------------
-# ONE DRIVE POLLING
-# -------------------------
-def poll_onedrive():
-    tenant_token = get_tenant_token()
-    processed_files = set()
-
-    while True:
-        try:
-            # List files from OneDrive folder (basic approach)
-            # Replace ?e=xxx with &download=1 to get direct download
-            import requests, re
-
-            folder_url = ONEDRIVE_SHARE_LINK
-            html = requests.get(folder_url).text
-            pdf_links = re.findall(r'href="(https://1drv.ms/[^\"]+\.pdf)"', html)
-            
-            for link in pdf_links:
-                decoded_link = unquote(link)
-                if decoded_link in processed_files:
-                    continue
-                print(f"📄 Processing {decoded_link}")
-                pdf_bytes = urlopen(decoded_link).read()
-                metadata, diseases = extract_report_from_bytes(pdf_bytes)
-                for row in diseases:
-                    insert_record(tenant_token, metadata, row)
-                processed_files.add(decoded_link)
-
-        except Exception as e:
-            print("❌ Error in polling:", e)
-
-        time.sleep(POLL_INTERVAL)
-
-# -------------------------
-# RUN WATCHER IN THREAD
-# -------------------------
-def start_watcher():
-    thread = threading.Thread(target=poll_onedrive, daemon=True)
-    thread.start()
-    print("👀 Watcher thread started")
-
-# -------------------------
-# FLASK APP (dummy, keeps Render happy)
-# -------------------------
 from flask import Flask
 
 app = Flask(__name__)
 
+TENANT_ID = os.environ["TENANT_ID"]
+CLIENT_ID = os.environ["CLIENT_ID"]
+CLIENT_SECRET = os.environ["CLIENT_SECRET"]
+
+PROCESSED_FILE = "processed_files.txt"
+
+
 @app.route("/")
-def index():
-    return "PDF watcher running! Check logs for activity."
+def home():
+    return "Watcher running"
+
+
+def get_token():
+    url = f"https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/token"
+
+    data = {
+        "client_id": CLIENT_ID,
+        "scope": "https://graph.microsoft.com/.default",
+        "client_secret": CLIENT_SECRET,
+        "grant_type": "client_credentials",
+    }
+
+    r = requests.post(url, data=data)
+    r.raise_for_status()
+    return r.json()["access_token"]
+
+
+def get_files(token):
+    headers = {"Authorization": f"Bearer {token}"}
+    url = "https://graph.microsoft.com/v1.0/me/drive/root:/Reports:/children"
+
+    r = requests.get(url, headers=headers)
+    r.raise_for_status()
+    return r.json()["value"]
+
+
+def load_processed():
+    if not os.path.exists(PROCESSED_FILE):
+        return set()
+
+    with open(PROCESSED_FILE) as f:
+        return set(f.read().splitlines())
+
+
+def save_processed(file_id):
+    with open(PROCESSED_FILE, "a") as f:
+        f.write(file_id + "\n")
+
+
+def download_file(file):
+    download_url = file["@microsoft.graph.downloadUrl"]
+    r = requests.get(download_url)
+
+    filename = file["name"]
+
+    with open(filename, "wb") as f:
+        f.write(r.content)
+
+    return filename
+
+
+def process_pdf(filepath):
+    print("Processing:", filepath)
+
+    # your existing PDF parser goes here
+    # parse_pdf(filepath)
+    # send_to_lark(data)
+
+
+def watcher_loop():
+
+    while True:
+        try:
+            token = get_token()
+            files = get_files(token)
+
+            processed = load_processed()
+
+            for file in files:
+
+                if not file["name"].lower().endswith(".pdf"):
+                    continue
+
+                if file["id"] in processed:
+                    continue
+
+                print("New PDF:", file["name"])
+
+                path = download_file(file)
+
+                process_pdf(path)
+
+                save_processed(file["id"])
+
+        except Exception as e:
+            print("Watcher error:", e)
+
+        time.sleep(60)
+
 
 if __name__ == "__main__":
-    start_watcher()
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+
+    print("Starting watcher thread...")
+
+    thread = threading.Thread(target=watcher_loop)
+    thread.start()
+
+    port = int(os.environ.get("PORT", 10000))
+
+    print("Starting web server on port", port)
+
+    app.run(host="0.0.0.0", port=port)
