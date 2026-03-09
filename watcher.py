@@ -15,14 +15,34 @@ TENANT_ID = os.environ.get("TENANT_ID")
 CLIENT_ID = os.environ.get("CLIENT_ID")
 CLIENT_SECRET = os.environ.get("CLIENT_SECRET")
 
-ONEDRIVE_OWNER_EMAIL = "hanlie.bosman@gmail.com"  # your OneDrive owner email
+ONEDRIVE_OWNER_EMAIL = "hanlie.bosman@gmail.com"
 ONEDRIVE_FOLDER = "poultry reports"
 
 PROCESSED_FILE = "processed_files.txt"
 
+# Lark configuration
+APP_TOKEN = os.environ.get("LARK_APP_TOKEN")
+TABLE_ID = os.environ.get("LARK_TABLE_ID")
+
+# Lark field IDs (replace with your actual field IDs)
+LARK_FIELDS = {
+    "lab_number": "flddRmu5It",
+    "sample_date": "fldX0aY5kH",
+    "client": "fldAtkUdXB",
+    "farm": "fldqjccBNo",
+    "address": "fldPy4ClNg",
+    "purpose": "fldiTix9Nk",
+    "species": "fldxldCfYI",
+    "state_vet": "fldRthV8jp",
+    "disease": "fldFQRj1wH",
+    "titre": "fldDEVDTdt",
+    "cv": "fldyHnbTxJ",
+    "interpretation": "fldxmt3lMo"
+}
+
 
 # -----------------------------
-# FLASK ROUTE (for Render health check)
+# FLASK ROUTE
 # -----------------------------
 @app.route("/")
 def home():
@@ -33,7 +53,6 @@ def home():
 # GET GRAPH TOKEN
 # -----------------------------
 def get_token():
-    print("Requesting Graph token...")
     url = f"https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/token"
     data = {
         "client_id": CLIENT_ID,
@@ -43,9 +62,7 @@ def get_token():
     }
     r = requests.post(url, data=data)
     r.raise_for_status()
-    token = r.json()["access_token"]
-    print("Graph token obtained.")
-    return token
+    return r.json()["access_token"]
 
 
 # -----------------------------
@@ -53,9 +70,7 @@ def get_token():
 # -----------------------------
 def get_files(token):
     headers = {"Authorization": f"Bearer {token}"}
-    # Use /users/{email}/drive/root:/folder:/children
     url = f"https://graph.microsoft.com/v1.0/users/{ONEDRIVE_OWNER_EMAIL}/drive/root:/{ONEDRIVE_FOLDER}:/children"
-    print(f"Checking OneDrive folder '{ONEDRIVE_FOLDER}'...")
     r = requests.get(url, headers=headers)
     r.raise_for_status()
     return r.json()["value"]
@@ -82,32 +97,72 @@ def save_processed(file_id):
 def download_file(file):
     download_url = file["@microsoft.graph.downloadUrl"]
     filename = Path(file["name"])
-    print(f"Downloading {filename}...")
     r = requests.get(download_url)
     r.raise_for_status()
     with open(filename, "wb") as f:
         f.write(r.content)
-    print(f"Downloaded {filename}")
     return filename
 
 
 # -----------------------------
-# PROCESS PDF AND SEND TO LARK
+# INSERT ROW INTO LARK
 # -----------------------------
-def process_pdf(filepath):
-    print(f"Processing PDF: {filepath}")
+def insert_to_lark(metadata, disease_row):
+    url = f"https://open.larksuite.com/open-apis/bitable/v1/apps/{APP_TOKEN}/tables/{TABLE_ID}/records"
+    headers = {
+        "Authorization": f"Bearer {APP_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    fields = {
+        LARK_FIELDS["lab_number"]: metadata["lab_number"],
+        LARK_FIELDS["sample_date"]: metadata["sample_date"],
+        LARK_FIELDS["client"]: metadata["client"],
+        LARK_FIELDS["farm"]: metadata["farm"],
+        LARK_FIELDS["address"]: metadata["address"],
+        LARK_FIELDS["purpose"]: metadata["purpose"],
+        LARK_FIELDS["species"]: metadata["species"],
+        LARK_FIELDS["state_vet"]: metadata["state_vet"],
+        LARK_FIELDS["disease"]: disease_row["disease"],
+        LARK_FIELDS["titre"]: disease_row["titre"],
+        LARK_FIELDS["cv"]: disease_row["cv"],
+        LARK_FIELDS["interpretation"]: disease_row["interpretation"]
+    }
+    payload = {"fields": fields}
+    r = requests.post(url, headers=headers, json=payload)
+    print(r.status_code, r.text)
 
-    # -----------------------------
-    # Example: PDF parsing & Lark insert
-    # Replace this with your real parser
-    # -----------------------------
-    # from extract_to_lark import parse_pdf, insert_to_lark
-    # data_blocks = parse_pdf(filepath)
-    # for block in data_blocks:
-    #     insert_to_lark(block)
-    # -----------------------------
 
-    print(f"(Demo) PDF processed: {filepath}")
+# -----------------------------
+# PARSE PDF (stub)
+# -----------------------------
+def parse_pdf(filepath):
+    """
+    Replace this stub with your actual PDF parser.
+    Must return:
+    metadata dict, and list of disease rows dicts.
+    Example:
+        metadata = {...}
+        diseases = [{...}, {...}]
+        return metadata, diseases
+    """
+    print(f"Parsing PDF: {filepath}")
+
+    # Demo example
+    metadata = {
+        "lab_number": "LAB123",
+        "sample_date": "2026-03-09",
+        "client": "ABC Poultry",
+        "farm": "Green Farm",
+        "address": "Pretoria",
+        "purpose": "Monitoring",
+        "species": "Chicken",
+        "state_vet": "Dr Smith"
+    }
+    diseases = [
+        {"disease": "Newcastle", "titre": 2400, "cv": 10.5, "interpretation": "Positive"},
+        {"disease": "IBD", "titre": 5200, "cv": 8.2, "interpretation": "Vaccinal"}
+    ]
+    return metadata, diseases
 
 
 # -----------------------------
@@ -128,13 +183,17 @@ def watcher_loop():
 
                 print(f"New PDF detected: {file['name']}")
                 path = download_file(file)
-                process_pdf(path)
+                metadata, diseases = parse_pdf(path)
+
+                for row in diseases:
+                    insert_to_lark(metadata, row)
+
                 save_processed(file["id"])
 
         except Exception as e:
             print("Watcher error:", e)
 
-        time.sleep(60)  # check every 60 seconds
+        time.sleep(60)
 
 
 # -----------------------------
