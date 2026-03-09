@@ -37,17 +37,14 @@ def get_files(token):
 
     headers = {"Authorization": f"Bearer {token}"}
 
-    url = "https://graph.microsoft.com/v1.0/users/me/drive/root:/Reports:/children"
+    url = "https://graph.microsoft.com/v1.0/drives"
 
     r = requests.get(url, headers=headers)
 
     print("Graph response:", r.status_code)
+    print(r.text)
 
-    if r.status_code != 200:
-        print(r.text)
-        return []
-
-    return r.json()["value"]
+    return []
 
 
 def load_processed():
@@ -85,24 +82,25 @@ def process_pdf(filepath):
 
 def watcher_loop():
 
-    print("Watcher started")
+    print("Watcher loop started")
 
     while True:
+
+        print("Checking OneDrive...")
+
         try:
 
-            print("Checking OneDrive folder...")
-
             token = get_token()
+            print("Token acquired")
 
             files = get_files(token)
-
-            print("Files found:", len(files))
+            print("Files returned:", len(files))
 
             processed = load_processed()
 
             for file in files:
 
-                print("Found file:", file["name"])
+                print("Found:", file["name"])
 
                 if not file["name"].lower().endswith(".pdf"):
                     continue
@@ -110,7 +108,7 @@ def watcher_loop():
                 if file["id"] in processed:
                     continue
 
-                print("New PDF detected:", file["name"])
+                print("New PDF:", file["name"])
 
                 path = download_file(file)
 
@@ -128,8 +126,10 @@ if __name__ == "__main__":
 
     print("Starting watcher thread...")
 
-    thread = threading.Thread(target=watcher_loop)
+    thread = threading.Thread(target=watcher_loop, daemon=True)
     thread.start()
+
+    print("Watcher thread started")
 
     port = int(os.environ.get("PORT", 10000))
 
