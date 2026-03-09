@@ -19,6 +19,9 @@ def home():
 
 
 def get_token():
+
+    print("Requesting Graph token...")
+
     url = f"https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/token"
 
     data = {
@@ -28,9 +31,19 @@ def get_token():
         "grant_type": "client_credentials",
     }
 
-    r = requests.post(url, data=data)
-    r.raise_for_status()
-    return r.json()["access_token"]
+    r = requests.post(url, data=data, timeout=15)
+
+    print("Token response status:", r.status_code)
+
+    if r.status_code != 200:
+        print("Token error:", r.text)
+        raise Exception("Failed to get token")
+
+    token = r.json()["access_token"]
+
+    print("Token acquired")
+
+    return token
 
 
 def get_files(token):
