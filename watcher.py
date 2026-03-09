@@ -4,6 +4,7 @@ import threading
 import requests
 from pathlib import Path
 from flask import Flask
+from extract_pdf import extract_diseases_from_pdf  # <-- your PDF parser
 
 app = Flask(__name__)
 
@@ -40,14 +41,12 @@ LARK_FIELDS = {
     "interpretation": "fldxmt3lMo"
 }
 
-
 # -----------------------------
 # FLASK ROUTE
 # -----------------------------
 @app.route("/")
 def home():
     return "Watcher running"
-
 
 # -----------------------------
 # GET GRAPH TOKEN
@@ -64,7 +63,6 @@ def get_token():
     r.raise_for_status()
     return r.json()["access_token"]
 
-
 # -----------------------------
 # LIST FILES IN ONEDRIVE FOLDER
 # -----------------------------
@@ -75,7 +73,6 @@ def get_files(token):
     r.raise_for_status()
     return r.json()["value"]
 
-
 # -----------------------------
 # PROCESSED FILES TRACKER
 # -----------------------------
@@ -85,11 +82,9 @@ def load_processed():
     with open(PROCESSED_FILE) as f:
         return set(f.read().splitlines())
 
-
 def save_processed(file_id):
     with open(PROCESSED_FILE, "a") as f:
         f.write(file_id + "\n")
-
 
 # -----------------------------
 # DOWNLOAD FILE FROM ONEDRIVE
@@ -102,7 +97,6 @@ def download_file(file):
     with open(filename, "wb") as f:
         f.write(r.content)
     return filename
-
 
 # -----------------------------
 # INSERT ROW INTO LARK
@@ -131,40 +125,6 @@ def insert_to_lark(metadata, disease_row):
     r = requests.post(url, headers=headers, json=payload)
     print(r.status_code, r.text)
 
-
-# -----------------------------
-# PARSE PDF (stub)
-# -----------------------------
-def parse_pdf(filepath):
-    """
-    Replace this stub with your actual PDF parser.
-    Must return:
-    metadata dict, and list of disease rows dicts.
-    Example:
-        metadata = {...}
-        diseases = [{...}, {...}]
-        return metadata, diseases
-    """
-    print(f"Parsing PDF: {filepath}")
-
-    # Demo example
-    metadata = {
-        "lab_number": "LAB123",
-        "sample_date": "2026-03-09",
-        "client": "ABC Poultry",
-        "farm": "Green Farm",
-        "address": "Pretoria",
-        "purpose": "Monitoring",
-        "species": "Chicken",
-        "state_vet": "Dr Smith"
-    }
-    diseases = [
-        {"disease": "Newcastle", "titre": 2400, "cv": 10.5, "interpretation": "Positive"},
-        {"disease": "IBD", "titre": 5200, "cv": 8.2, "interpretation": "Vaccinal"}
-    ]
-    return metadata, diseases
-
-
 # -----------------------------
 # WATCHER LOOP
 # -----------------------------
@@ -183,7 +143,9 @@ def watcher_loop():
 
                 print(f"New PDF detected: {file['name']}")
                 path = download_file(file)
-                metadata, diseases = parse_pdf(path)
+
+                # Use your real PDF parser here
+                metadata, diseases = extract_diseases_from_pdf(path)
 
                 for row in diseases:
                     insert_to_lark(metadata, row)
@@ -194,7 +156,6 @@ def watcher_loop():
             print("Watcher error:", e)
 
         time.sleep(60)
-
 
 # -----------------------------
 # MAIN
