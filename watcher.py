@@ -34,11 +34,19 @@ def get_token():
 
 
 def get_files(token):
+
     headers = {"Authorization": f"Bearer {token}"}
-    url = "https://graph.microsoft.com/v1.0/me/drive/root:/Reports:/children"
+
+    url = "https://graph.microsoft.com/v1.0/users/me/drive/root:/Reports:/children"
 
     r = requests.get(url, headers=headers)
-    r.raise_for_status()
+
+    print("Graph response:", r.status_code)
+
+    if r.status_code != 200:
+        print(r.text)
+        return []
+
     return r.json()["value"]
 
 
@@ -77,14 +85,24 @@ def process_pdf(filepath):
 
 def watcher_loop():
 
+    print("Watcher started")
+
     while True:
         try:
+
+            print("Checking OneDrive folder...")
+
             token = get_token()
+
             files = get_files(token)
+
+            print("Files found:", len(files))
 
             processed = load_processed()
 
             for file in files:
+
+                print("Found file:", file["name"])
 
                 if not file["name"].lower().endswith(".pdf"):
                     continue
@@ -92,7 +110,7 @@ def watcher_loop():
                 if file["id"] in processed:
                     continue
 
-                print("New PDF:", file["name"])
+                print("New PDF detected:", file["name"])
 
                 path = download_file(file)
 
