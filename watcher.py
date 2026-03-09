@@ -2,7 +2,7 @@ import os
 import time
 import threading
 import requests
-from extract_pdf import extract_pdf_to_lark  # your existing extractor
+from extract_pdf import extract_pdf
 from flask import Flask
 
 app = Flask(__name__)
