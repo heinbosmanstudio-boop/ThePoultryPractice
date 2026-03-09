@@ -2,72 +2,77 @@ import os
 import time
 import threading
 import requests
-from extract_pdf import extract_pdf
-from flask import Flask
+from extract_pdf import extract_pdf  # your existing PDF parser/extractor
 
-app = Flask(__name__)
+# ---------------------------------------
+# CONFIGURATION
+# ---------------------------------------
 
-# -----------------------------
-# Azure App Credentials
-# -----------------------------
-TENANT_ID = os.environ.get("TENANT_ID")
-CLIENT_ID = os.environ.get("CLIENT_ID")
-CLIENT_SECRET = os.environ.get("CLIENT_SECRET")
+# Azure app credentials (from heinbosmanstudio@gmail.com)
+TENANT_ID = os.environ["TENANT_ID"]
+CLIENT_ID = os.environ["CLIENT_ID"]
+CLIENT_SECRET = os.environ["CLIENT_SECRET"]
 
-# -----------------------------
-# OneDrive folder to watch
-# -----------------------------
-ONEDRIVE_FOLDER = "Reports"  # the folder inside OneDrive
+# OneDrive shared folder link (heinbosmanstudio@gmail.com)
+ONEDRIVE_SHARE_LINK = "https://1drv.ms/f/c/0e6ea992be415296/IgCbNFYWg4GSRrpBDCnYIIhLAVlvwwOPSIhzlw0eEln3_gg?e=2Szyuc"
+
+# Track processed files
 PROCESSED_FILE = "processed_files.txt"
 
-# -----------------------------
-# Lark integration
-# -----------------------------
-# Set these environment variables in Render or locally
-APP_ID = os.environ.get("APP_ID")
-APP_SECRET = os.environ.get("APP_SECRET")
-APP_TOKEN = os.environ.get("APP_TOKEN")
-TABLE_ID = os.environ.get("TABLE_ID")
+# Polling interval in seconds
+POLL_INTERVAL = 60
 
-# -----------------------------
-# Flask route for status
-# -----------------------------
-@app.route("/")
-def home():
-    return "Watcher running"
+# ---------------------------------------
+# HELPER FUNCTIONS
+# ---------------------------------------
 
-
-# -----------------------------
-# Get Microsoft Graph token
-# -----------------------------
 def get_token():
-    print("Requesting Graph token...")
+    """Request an Azure AD token using client credentials."""
     url = f"https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/token"
+
     data = {
         "client_id": CLIENT_ID,
         "scope": "https://graph.microsoft.com/.default",
         "client_secret": CLIENT_SECRET,
         "grant_type": "client_credentials",
     }
+
     r = requests.post(url, data=data)
     r.raise_for_status()
-    return r.json()["access_token"]
+    token = r.json()["access_token"]
+    return token
 
 
-# -----------------------------
-# Get files from OneDrive folder
-# -----------------------------
-def get_files(token):
+def get_shared_folder_id(token, share_link):
+    """Convert OneDrive share link to folder ID using Microsoft Graph."""
     headers = {"Authorization": f"Bearer {token}"}
-    url = f"https://graph.microsoft.com/v1.0/me/drive/root:/{ONEDRIVE_FOLDER}:/children"
+    url = f"https://graph.microsoft.com/v1.0/shares/{share_link_to_encoded_id(share_link)}/driveItem"
     r = requests.get(url, headers=headers)
     r.raise_for_status()
-    return r.json()["value"]
+    return r.json()["id"]
 
 
-# -----------------------------
-# Process tracking
-# -----------------------------
+def share_link_to_encoded_id(link):
+    """
+    Convert share link into encoded ID for Graph API.
+    """
+    import base64
+    import urllib.parse
+
+    # Remove "https://1drv.ms/f/" and encode
+    encoded = base64.urlsafe_b64encode(link.encode("utf-8")).decode("utf-8").rstrip("=")
+    return f"u!{encoded}"
+
+
+def list_folder_files(token, folder_id):
+    """List files in a OneDrive folder by folder ID."""
+    headers = {"Authorization": f"Bearer {token}"}
+    url = f"https://graph.microsoft.com/v1.0/me/drive/items/{folder_id}/children"
+    r = requests.get(url, headers=headers)
+    r.raise_for_status()
+    return r.json().get("value", [])
+
+
 def load_processed():
     if not os.path.exists(PROCESSED_FILE):
         return set()
@@ -80,28 +85,33 @@ def save_processed(file_id):
         f.write(file_id + "\n")
 
 
-# -----------------------------
-# Download PDF
-# -----------------------------
 def download_file(file):
+    """Download PDF from OneDrive to local."""
     download_url = file["@microsoft.graph.downloadUrl"]
-    r = requests.get(download_url)
     filename = file["name"]
+
+    r = requests.get(download_url)
+    r.raise_for_status()
+
     with open(filename, "wb") as f:
         f.write(r.content)
-    print("Downloaded:", filename)
+
     return filename
 
 
-# -----------------------------
-# Main watcher loop
-# -----------------------------
+# ---------------------------------------
+# WATCHER LOOP
+# ---------------------------------------
+
 def watcher_loop():
     print("Watcher loop started")
     while True:
         try:
             token = get_token()
-            files = get_files(token)
+            print("Requesting folder ID...")
+            folder_id = get_shared_folder_id(token, ONEDRIVE_SHARE_LINK)
+
+            files = list_folder_files(token, folder_id)
             processed = load_processed()
 
             for file in files:
@@ -111,29 +121,28 @@ def watcher_loop():
                     continue
 
                 print("New PDF detected:", file["name"])
-                filepath = download_file(file)
+                path = download_file(file)
 
-                # --- Process PDF and send to Lark ---
-                extract_pdf_to_lark(filepath, APP_ID, APP_SECRET, APP_TOKEN, TABLE_ID)
+                # Process PDF using your existing extractor
+                extract_pdf(path)
 
                 save_processed(file["id"])
-                print("Processed and sent to Lark:", file["name"])
 
         except Exception as e:
             print("Watcher error:", e)
 
-        time.sleep(60)  # check every 60 seconds
+        time.sleep(POLL_INTERVAL)
 
 
-# -----------------------------
-# Main entry
-# -----------------------------
+# ---------------------------------------
+# ENTRY POINT
+# ---------------------------------------
+
 if __name__ == "__main__":
     print("Starting watcher thread...")
-    thread = threading.Thread(target=watcher_loop)
-    thread.daemon = True
+    thread = threading.Thread(target=watcher_loop, daemon=True)
     thread.start()
 
-    port = int(os.environ.get("PORT", 10000))
-    print("Starting web server on port", port)
-    app.run(host="0.0.0.0", port=port)
+    print("Watcher running. Ctrl+C to quit.")
+    while True:
+        time.sleep(60)
